@@ -1,1 +1,1 @@
-# Nasa-Space-Apps-ML
+# Exoplanet ML
