@@ -421,53 +421,41 @@ def predict_if_possible(df_input):
     return preds, conf
 
 # ---------- Viz data ----------
-def _load_koi_remote():
-    # Lightweight subset via TAP: change columns as you like
-    url = (
-      "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
-      "?query=select+kepoi_name,koi_disposition,koi_period,koi_duration,koi_depth,"
-      "koi_prad,koi_impact,koi_snr,koi_steff,koi_slogg,koi_srad+from+kepler_koi"
-      "&format=csv"
-    )
-    d = pd.read_csv(url)
-    d = d.rename(columns={
-        "kepoi_name":"name",
-        "koi_disposition":"disposition",
-        "koi_period":"period",
-        "koi_duration":"duration",
-        "koi_depth":"depth",
-        "koi_prad":"prad",
-        "koi_impact":"impact",
-        "koi_snr":"snr",
-        "koi_steff":"steff",
-        "koi_slogg":"slogg",
-        "koi_srad":"srad",
-    })
-    d["mission"] = "kepler"
-    return d
-
 @st.cache_data(show_spinner=False)
 def load_union_galaxy():
     frames = []
-    koi_path = os.path.join(RAW_DIR, "koi_cumulative.csv")
-    if os.path.exists(koi_path):
-        d = safe_read_csv(koi_path)
-        d = normalize_catalog_headers(d); d["mission"] = "kepler"
-        frames.append(d)
-    else:
-        try:
-            frames.append(_load_koi_remote())
-        except Exception:
-            pass
 
-    # (You can add similar remote fallbacks for K2/TOI later.)
+    # 1) Prefer local raw files (mounted on your dev machine)
+    koi_path = os.path.join(RAW_DIR, "koi_cumulative.csv")
+    k2_path  = os.path.join(RAW_DIR, "k2pandac.csv")
+    toi_path = os.path.join(RAW_DIR, "toi.csv")
+
+    # 2) Fallback to repo samples (committed)
+    koi_sample = os.path.join(ROOT_DIR, "data", "samples", "koi_cumulative_sample.csv")
+    k2_sample  = os.path.join(ROOT_DIR, "data", "samples", "k2pandc_sample.csv")
+    toi_sample = os.path.join(ROOT_DIR, "data", "samples", "toi_sample.csv")
+
+    # Helper
+    def _try(path, mission, name_prefix):
+        if path and os.path.exists(path):
+            d = safe_read_csv(path)
+            if d is not None and not d.empty:
+                d = normalize_catalog_headers(d)
+                d["mission"] = mission
+                if "name" not in d.columns:
+                    d["name"] = [f"{name_prefix}-{i}" for i in range(len(d))]
+                frames.append(d)
+
+    _try(koi_path if os.path.exists(koi_path) else koi_sample, "kepler", "KOI")
+    _try(k2_path  if os.path.exists(k2_path)  else k2_sample,  "k2",     "K2")
+    _try(toi_path if os.path.exists(toi_path) else toi_sample, "tess",   "TOI")
 
     if not frames:
-        st.error("No catalog found locally and remote fetch failed. Upload a CSV or commit a sample to the repo.")
+        st.error("No catalog data found (raw or samples). Add a sample to data/samples/ or upload a CSV in the UI.")
         return pd.DataFrame()
 
-    return pd.concat(frames, ignore_index=True)
-
+    df = pd.concat(frames, ignore_index=True)
+    return df
 
 # ---------- Plotly renderers ----------
 def render_galaxy3d_plotly(planets, bg="#0b1020", key=None):
