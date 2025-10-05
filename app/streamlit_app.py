@@ -573,6 +573,44 @@ def batch_classify_df(df: pd.DataFrame) -> pd.DataFrame:
     out["confidence"] = confs
     return out
 
+def _first_numeric_column(df: pd.DataFrame) -> str:
+    for c in df.columns:
+        if pd.api.types.is_numeric_dtype(df[c]):
+            return c
+    # fallback if nothing numeric
+    return df.columns[0] if len(df.columns) else "period"
+
+def _resolve_order_feature(df: pd.DataFrame, feature_for_order) -> str:
+    """
+    Normalize the 'feature_for_order' into a concrete column name in df.
+    Accepts:
+      - string column name
+      - dict with keys like 'col'/'column'/'feature'/'name'
+      - callable that returns a Series to sort by (we materialize into a temp column)
+    """
+    # string → ensure it exists, else fallback
+    if isinstance(feature_for_order, str):
+        return feature_for_order if feature_for_order in df.columns else _first_numeric_column(df)
+
+    # dict → try common keys
+    if isinstance(feature_for_order, dict):
+        for key in ("col", "column", "feature", "name"):
+            val = feature_for_order.get(key)
+            if isinstance(val, str) and val in df.columns:
+                return val
+        # last resort: first numeric in df
+        return _first_numeric_column(df)
+
+    # callable → compute a temp column name
+    if callable(feature_for_order):
+        col = "__order_feature__"
+        s = feature_for_order(df)
+        df[col] = pd.to_numeric(s, errors="coerce")
+        return col
+
+    # unknown type → fallback
+    return _first_numeric_column(df)
+
 def add_xyz_layout(df: pd.DataFrame, feature_for_order: str, rings: int = 8, pretty: bool = True) -> pd.DataFrame:
     """
     Compute simple 3D coordinates for each row and return df with x,y,z columns.
@@ -706,6 +744,21 @@ def main():
 
         def _get_float(row, col):
             return None if col not in row or pd.isna(row[col]) else float(row[col])
+
+
+        raw_order = ORDER_FEATURES.get(order_label, "period")
+        resolved_order_col = _resolve_order_feature(rows, raw_order)
+
+        rows = add_xyz_layout(
+            rows,
+            feature_for_order=resolved_order_col,
+            rings=8,
+            pretty=pretty_mode
+        )
+
+        # clean any temp column we may have created
+        if "__order_feature__" in rows.columns:
+            rows.drop(columns=["__order_feature__"], inplace=True)
 
         # Ensure 3D coordinates exist for plotting
         order_feature = ORDER_FEATURES[order_label]  # you already have this from the UI
