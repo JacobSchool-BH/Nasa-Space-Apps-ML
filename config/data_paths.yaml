@@ -1,0 +1,4 @@
+# config/data_paths.yaml
+koi_csv: "data/raw/koi_cumulative.csv"
+k2_csv:  "data/raw/k2pandc.csv"
+toi_csv: "data/raw/toi.csv"

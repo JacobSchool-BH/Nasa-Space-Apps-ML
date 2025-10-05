@@ -1,0 +1,3 @@
+period,duration,depth,prad,impact,snr,steff,slogg,srad,mission,prediction,confidence
+10.5,4.2,300.0,1.2,0.1,15.0,5700,4.4,1.0,kepler,CANDIDATE,0.4435764
+42.0,3.1,1200.0,2.3,0.3,9.5,5000,4.5,0.9,tess,CANDIDATE,0.98832035
