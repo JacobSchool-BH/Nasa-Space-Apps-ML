@@ -234,20 +234,77 @@ def build_features(df_raw: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     return df, feat_cols
 
 # ---------- Model I/O ----------
-@st.cache_resource
+# ===== Models directory (robust) =====
+# Default: repo-root /models (one level above app/)
+MODELS_DIR = os.path.join(ROOT_DIR, "models")
+# Optional override via env (e.g., set in Streamlit Cloud "Secrets")
+if os.getenv("MODELS_DIR"):
+    MODELS_DIR = os.getenv("MODELS_DIR")
+
+def _candidate_model_dirs():
+    """Return plausible places to look for model bundle."""
+    return [
+        MODELS_DIR,
+        os.path.join(ROOT_DIR, "models"),   # repo root
+        os.path.join(BASE_DIR, "models"),   # alongside app/
+        os.path.join(os.getcwd(), "models") # current working directory
+    ]
+
+def _candidate_names():
+    """Accept several common filenames."""
+    return {
+        "model":  ["exoplanet_mlp.keras", "model.keras", "exoplanet_mlp.h5", "model.h5"],
+        "scaler": ["scaler.joblib", "scaler.pkl"],
+        "meta":   ["meta.json"],
+    }
+
+@st.cache_resource(show_spinner=False)
 def load_model_bundle():
-    if tf is None: return None
-    try:
-        model = tf.keras.models.load_model(os.path.join(MODELS_DIR, "exoplanet_mlp.keras"))
-        scaler = joblib.load(os.path.join(MODELS_DIR, "scaler.joblib"))
-        meta_path = os.path.join(MODELS_DIR, "meta.json")
-        meta = {}
-        if os.path.exists(meta_path):
-            with open(meta_path) as f:
-                meta = json.load(f)
-        return model, scaler, meta
-    except Exception:
+    """
+    Flexible loader:
+    - Searches multiple /models locations
+    - Accepts alternate filenames
+    - Falls back to user uploaded bundle saved in st.session_state['override_models_dir']
+    """
+    if 'override_models_dir' in st.session_state:
+        dirs = [st.session_state['override_models_dir']] + _candidate_model_dirs()
+    else:
+        dirs = _candidate_model_dirs()
+
+    names = _candidate_names()
+    if tf is None:
         return None
+
+    for d in dirs:
+        try:
+            if not d or not os.path.isdir(d):
+                continue
+
+            def _first_exists(options):
+                for fn in options:
+                    p = os.path.join(d, fn)
+                    if os.path.exists(p):
+                        return p
+                return None
+
+            model_path  = _first_exists(names["model"])
+            scaler_path = _first_exists(names["scaler"])
+            meta_path   = _first_exists(names["meta"])
+
+            if not (model_path and scaler_path and meta_path):
+                continue
+
+            model = tf.keras.models.load_model(model_path)
+            scaler = joblib.load(scaler_path)
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            return model, scaler, meta
+        except Exception:
+            # try next candidate directory
+            continue
+
+    return None
+
 
 def build_mlp(input_dim: int, n_classes: int = 2, hidden=[192,96], dropout=0.25, lr=5e-4):
     if tf is None:
@@ -964,33 +1021,69 @@ def main():
     else:
         st.subheader("🧪 Batch Classifier — Binary Output (CONFIRMED vs FALSE POSITIVE)")
         bundle = load_model_bundle()
+
         if bundle is None:
-            st.warning("No trained model found in `/models`. Go to **Researcher** → Train, then return here.")
-        else:
-            st.success("Binary model loaded. Ready to classify.")
+            with st.expander("🧩 Model Status", expanded=True):
+                st.warning(
+                    "Model bundle not found in /models.\n\n"
+                    "Provide the three files below, or push them to your repo at **/models**:"
+                )
+                st.code(
+                    "models/\n"
+                    "  ├─ exoplanet_mlp.keras  (or model.keras / .h5)\n"
+                    "  ├─ scaler.joblib        (or scaler.pkl)\n"
+                    "  └─ meta.json"
+                )
 
-        st.markdown("Upload a CSV with columns like **period, duration, depth, prad, impact, snr, steff, slogg, srad**. "
-                    "KOI/K2/TOI names also work — we auto-map.")
+                c1, c2, c3 = st.columns(3)
+                up_model  = c1.file_uploader("Model (.keras/.h5)", type=["keras","h5"], key="up_model")
+                up_scaler = c2.file_uploader("Scaler (.joblib/.pkl)", type=["joblib","pkl"], key="up_scaler")
+                up_meta   = c3.file_uploader("Meta (.json)", type=["json"], key="up_meta")
 
-        ctu1, ctu2 = st.columns([1,1])
+                if up_model and up_scaler and up_meta:
+                    import tempfile
+                    tmpdir = tempfile.mkdtemp(prefix="models_")
+
+                    model_name  = "exoplanet_mlp.keras" if up_model.name.endswith((".keras", ".h5")) else "model.keras"
+                    scaler_name = "scaler.joblib" if up_scaler.name.endswith(".joblib") else "scaler.pkl"
+                    meta_name   = "meta.json"
+
+                    with open(os.path.join(tmpdir, model_name), "wb") as f:
+                        f.write(up_model.getvalue())
+                    with open(os.path.join(tmpdir, scaler_name), "wb") as f:
+                        f.write(up_scaler.getvalue())
+                    with open(os.path.join(tmpdir, meta_name), "wb") as f:
+                        f.write(up_meta.getvalue())
+
+                    st.session_state['override_models_dir'] = tmpdir
+                    st.success("Model bundle loaded from uploads. Using it for this session.")
+                    st.rerun()
+
+            st.stop()
+
+        # If we get here, the model is loaded
+        st.success("Binary model loaded. Ready to classify.")
+        model, scaler, meta = bundle
+
+        st.markdown(
+            "Upload a CSV with columns like **period, duration, depth, prad, impact, snr, steff, slogg, srad**. "
+            "KOI/K2/TOI names also work — we auto-map."
+        )
+
+        ctu1, ctu2 = st.columns([1, 1])
         with ctu1:
-            uploaded = st.file_uploader("Upload CSV to classify", type=["csv"], key="tester_upload")
+            up = st.file_uploader("Upload a CSV to classify", type=["csv"], key="tester_upload_csv")
+            df_in = None
+            if up is not None:
+                df_in = safe_read_csv_bytes(up.getvalue())
         with ctu2:
-            use_sample = st.button("Use tiny sample (5 rows)", key="tester_use_sample")
-
-        df_in = None
-        if uploaded is not None:
-            try:
-                raw = uploaded.read()
-                df_in = safe_read_csv_bytes(raw)
-            except Exception as e:
-                st.error(f"Failed to read CSV: {e}")
-
-        if use_sample and df_in is None:
-            df_in = pd.DataFrame([{
-                "period": 10.5, "duration": 3.4, "depth": 800, "prad": 1.8, "impact": 0.2,
-                "snr": 12.0, "steff": 5400, "slogg": 4.5, "srad": 1.0, "mission": "kepler"
-            } for _ in range(5)])
+            if st.button("Use a tiny demo CSV", key="tester_demo_btn"):
+                df_in = pd.DataFrame([
+                    {"name":"Kepler-22b","period":289.9,"duration":7.4,"depth":400.0,"prad":2.4,"impact":0.3,"snr":30.0,"steff":5518,"slogg":4.4,"srad":1.0,"mission":"kepler"},
+                    {"name":"K2-18b","period":32.9,"duration":2.3,"depth":1000.0,"prad":2.6,"impact":0.1,"snr":50.0,"steff":3500,"slogg":4.8,"srad":0.4,"mission":"k2"},
+                    {"name":"TOI-700 d","period":37.4,"duration":3.0,"depth":800.0,"prad":1.1,"impact":0.2,"snr":40.0,"steff":5300,"slogg":4.7,"srad":0.9,"mission":"tess"},
+                    {"name":"KOI-7923.01","period":395.4,"duration":4.3,"depth":300.0,"prad":0.9,"impact":0.5,"snr":12.0,"steff":5150,"slogg":4.5,"srad":0.9,"mission":"kepler"},
+                ])
 
         if df_in is None:
             st.info("Upload a CSV (or click the sample button) to begin.")
@@ -1009,10 +1102,14 @@ def main():
                 st.download_button(
                     "⬇️ Download predictions (CSV)",
                     data=results.to_csv(index=False).encode("utf-8"),
-                    file_name="predictions_binary.csv", mime="text/csv", key="tester_download_csv"
+                    file_name="predictions_binary.csv",
+                    mime="text/csv",
+                    key="tester_download_csv"
                 )
             except Exception as e:
-                st.error("Could not classify this CSV."); st.exception(e)
+                st.error("Could not classify this CSV.")
+                st.exception(e)
+
 
 # ----- Crash guard -----
 try:
