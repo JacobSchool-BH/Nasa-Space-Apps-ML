@@ -573,6 +573,56 @@ def batch_classify_df(df: pd.DataFrame) -> pd.DataFrame:
     out["confidence"] = confs
     return out
 
+def add_xyz_layout(df: pd.DataFrame, feature_for_order: str, rings: int = 8, pretty: bool = True) -> pd.DataFrame:
+    """
+    Compute simple 3D coordinates for each row and return df with x,y,z columns.
+    - feature_for_order is a numeric column name used to distribute planets across rings
+    """
+    if df is None or df.empty:
+        return df.assign(x=[], y=[], z=[])
+
+    planets = df.reset_index(drop=True).copy()
+
+    # 1) Sort by chosen feature (missing -> last)
+    vals = []
+    for i, row in planets.iterrows():
+        v = row.get(feature_for_order, None)
+        try:
+            v = float(v) if v is not None else None
+        except Exception:
+            v = None
+        vals.append((1e99 if v is None else v, i))
+    vals.sort(key=lambda t: t[0])
+
+    # 2) Round-robin into rings
+    outer_r, inner_r = 18.0, 3.0
+    ring_radii = np.linspace(inner_r, outer_r, rings)
+    ring_members = [[] for _ in range(rings)]
+    for k, (_, idx) in enumerate(vals):
+        ring_members[k % rings].append(idx)
+
+    # 3) Angle placement per ring
+    xs, ys, zs = np.zeros(len(planets)), np.zeros(len(planets)), np.zeros(len(planets))
+    for r_idx, members in enumerate(ring_members):
+        if not members:
+            continue
+        radius = ring_radii[r_idx]
+        n = len(members)
+        for j, idx in enumerate(members):
+            theta = 2.0 * np.pi * j / max(n, 1)
+            # flat disc (z=0) or light warp if pretty:
+            z = 0.0
+            if pretty:
+                # tiny vertical ripple for aesthetics
+                z = 0.5 * np.sin(theta * 3.0 + r_idx * 0.7)
+            xs[idx] = radius * np.cos(theta)
+            ys[idx] = radius * np.sin(theta)
+            zs[idx] = z
+
+    planets["x"], planets["y"], planets["z"] = xs, ys, zs
+    return planets
+
+
 # ---------- Model status ----------
 def model_status():
     ok = False; msg = "No model loaded"
@@ -656,6 +706,12 @@ def main():
 
         def _get_float(row, col):
             return None if col not in row or pd.isna(row[col]) else float(row[col])
+
+        # Ensure 3D coordinates exist for plotting
+        order_feature = ORDER_FEATURES[order_label]  # you already have this from the UI
+        if not {"x", "y", "z"}.issubset(rows.columns):
+            rows = add_xyz_layout(rows, feature_for_order=order_feature, rings=8, pretty=pretty_mode)
+
 
         planets_payload=[]
         for i, row in rows.reset_index(drop=True).iterrows():
