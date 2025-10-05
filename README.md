@@ -1,4 +1,3 @@
-cat > README.md << 'EOF'
 # Exoplanet Explorer (NASA Space Apps)
 
 Streamlit app for exploring KOI/K2/TOI catalogs and a binary ML model (CONFIRMED vs FALSE POSITIVE).
@@ -9,4 +8,4 @@ Streamlit app for exploring KOI/K2/TOI catalogs and a binary ML model (CONFIRMED
 ## Run locally
 ```bash
 pip install -r requirements.txt
-streamlit run streamlit_app.py
+streamlit run app/streamlit_app.py
