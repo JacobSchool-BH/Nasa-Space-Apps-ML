@@ -22,3 +22,7 @@ models/
 # Jupyter checkpoints
 .ipynb_checkpoints/
 EOF
+
+# Track only samples
+!data/samples/
+!data/samples/*.csv
