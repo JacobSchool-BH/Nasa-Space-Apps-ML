@@ -421,55 +421,53 @@ def predict_if_possible(df_input):
     return preds, conf
 
 # ---------- Viz data ----------
+def _load_koi_remote():
+    # Lightweight subset via TAP: change columns as you like
+    url = (
+      "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
+      "?query=select+kepoi_name,koi_disposition,koi_period,koi_duration,koi_depth,"
+      "koi_prad,koi_impact,koi_snr,koi_steff,koi_slogg,koi_srad+from+kepler_koi"
+      "&format=csv"
+    )
+    d = pd.read_csv(url)
+    d = d.rename(columns={
+        "kepoi_name":"name",
+        "koi_disposition":"disposition",
+        "koi_period":"period",
+        "koi_duration":"duration",
+        "koi_depth":"depth",
+        "koi_prad":"prad",
+        "koi_impact":"impact",
+        "koi_snr":"snr",
+        "koi_steff":"steff",
+        "koi_slogg":"slogg",
+        "koi_srad":"srad",
+    })
+    d["mission"] = "kepler"
+    return d
+
 @st.cache_data(show_spinner=False)
 def load_union_galaxy():
     frames = []
     koi_path = os.path.join(RAW_DIR, "koi_cumulative.csv")
     if os.path.exists(koi_path):
-        hdr = pd.read_csv(koi_path, nrows=0).columns.tolist()
-        use = ["koi_period","koi_duration","koi_depth","koi_prad","koi_impact",
-               "koi_snr","koi_model_snr","koi_steff","koi_slogg","koi_srad","koi_disposition"]
-        d = pd.read_csv(koi_path, usecols=[c for c in use if c in hdr])
-        d = _clean_unified(d); d["mission"]="kepler"; d["name"]=[f"KOI-{i}" for i in range(len(d))]
+        d = safe_read_csv(koi_path)
+        d = normalize_catalog_headers(d); d["mission"] = "kepler"
         frames.append(d)
-    k2_path = _first_existing(RAW_DIR, K2_FILE_CANDIDATES)
-    if k2_path:
-        d = safe_read_csv(k2_path)
-        if d is not None and not d.empty:
-            d = normalize_catalog_headers(d); d["mission"]="k2"; d["name"]=[f"K2-{i}" for i in range(len(d))]
-            frames.append(d)
-    toi_path = _first_existing(RAW_DIR, TOI_FILE_CANDIDATES)
-    if toi_path:
-        d = safe_read_csv(toi_path)
-        if d is not None and not d.empty:
-            d = normalize_catalog_headers(d); d["mission"]="tess"; d["name"]=[f"TOI-{i}" for i in range(len(d))]
-            frames.append(d)
+    else:
+        try:
+            frames.append(_load_koi_remote())
+        except Exception:
+            pass
+
+    # (You can add similar remote fallbacks for K2/TOI later.)
 
     if not frames:
-        demo = pd.DataFrame([
-            {"name":"Kepler-22b","period":289.9,"duration":7.4,"depth":400,"prad":2.4,"impact":0.2,"snr":25,"steff":5700,"slogg":4.4,"srad":1.0,"disposition":"CONFIRMED","mission":"kepler"},
-            {"name":"K2-18b","period":32.9,"duration":2.3,"depth":1500,"prad":2.6,"impact":0.3,"snr":18,"steff":3500,"slogg":4.8,"srad":0.4,"disposition":"CONFIRMED","mission":"k2"},
-            {"name":"TOI-700 d","period":37.4,"duration":3.0,"depth":700,"prad":1.1,"impact":0.2,"snr":12,"steff":4200,"slogg":4.7,"srad":0.9,"disposition":"CANDIDATE","mission":"tess"},
-            {"name":"KOI-7923.01","period":395.4,"duration":8.2,"depth":300,"prad":1.0,"impact":0.1,"snr":9,"steff":5200,"slogg":4.5,"srad":0.9,"disposition":"CANDIDATE","mission":"kepler"},
-        ])
-        feats = demo[["period","prad","snr","duration","depth","impact","steff","slogg","srad"]].copy()
-        feats = np.log10(feats.clip(lower=1e-6))
-        Xs = StandardScaler().fit_transform(feats.values)
-        xyz = PCA(n_components=3, random_state=42).fit_transform(Xs)
-        demo["x"], demo["y"], demo["z"] = xyz[:,0], xyz[:,1], xyz[:,2]
-        return demo
+        st.error("No catalog found locally and remote fetch failed. Upload a CSV or commit a sample to the repo.")
+        return pd.DataFrame()
 
-    all_df = pd.concat(frames, ignore_index=True, sort=False)
-    core = all_df.dropna(subset=["period","prad"]).copy()
-    for c in ["snr","duration","depth","impact","steff","slogg","srad"]:
-        if c in core.columns: core[c] = core[c].fillna(core[c].median())
-    feats = core[["period","prad","snr","duration","depth","impact","steff","slogg","srad"]].copy()
-    feats = np.log10(feats.clip(lower=1e-6))
-    Xs = StandardScaler().fit_transform(feats.values)
-    xyz = PCA(n_components=3, random_state=42).fit_transform(Xs)
-    core["x"], core["y"], core["z"] = xyz[:,0], xyz[:,1], xyz[:,2]
-    core["disposition"] = core.get("disposition","CANDIDATE").astype(str).str.upper()
-    return core
+    return pd.concat(frames, ignore_index=True)
+
 
 # ---------- Plotly renderers ----------
 def render_galaxy3d_plotly(planets, bg="#0b1020", key=None):
