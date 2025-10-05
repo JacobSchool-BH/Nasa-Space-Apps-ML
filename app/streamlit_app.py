@@ -28,6 +28,10 @@ import plotly.graph_objects as go
 
 # ---------- Page ----------
 st.set_page_config(page_title="Exoplanet Explorer (Binary)", page_icon="🪐", layout="wide")
+GITHUB_URL = "https://github.com/JacobSchool-BH/Nasa-Space-Apps-ML"
+st.sidebar.markdown(
+    f'[![GitHub Repo](https://img.shields.io/badge/GitHub-Nasa--Space--Apps--ML-181717?logo=github)]({GITHUB_URL})'
+)
 
 # ---------- Paths / constants ----------
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
