@@ -21,3 +21,9 @@ EOF
 # Track only samples
 !data/samples/
 !data/samples/*.csv
+
+# allow these specific raw files for Streamlit Cloud
+!data/raw/
+!data/raw/koi_cumulative.csv
+!data/raw/k2pandc.csv
+!data/raw/toi.csv
