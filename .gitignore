@@ -9,11 +9,6 @@ venv/
 # Streamlit cache
 .streamlit/
 
-# Data & models (keep repo light; add small samples only)
-data/raw/
-data/user_uploads/
-models/
-
 # OS/editor
 .DS_Store
 .vscode/
