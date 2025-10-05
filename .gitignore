@@ -14,6 +14,12 @@ venv/
 .vscode/
 .idea/
 
+# allow model bundle for Streamlit Cloud
+!models/
+!models/exoplanet_mlp.keras
+!models/scaler.joblib
+!models/meta.json
+
 # Jupyter checkpoints
 .ipynb_checkpoints/
 EOF
