@@ -56,6 +56,13 @@ ORDER_FEATURES = {
     "Stellar Teff (K) — inner = cooler host": {"field":"steff","desc":"Cooler hosts inside; hotter hosts outside."},
 }
 
+# near the top of app/streamlit_app.py
+from pathlib import Path
+ROOT_DIR = Path(__file__).resolve().parents[1]   # repo root (.. from app/)
+RAW_DIR = ROOT_DIR / "data" / "raw"
+SAMPLES_DIR = ROOT_DIR / "data" / "samples"
+
+
 # ---------- IO helpers ----------
 def _first_existing(dirpath, names):
     for n in names:
@@ -425,37 +432,39 @@ def predict_if_possible(df_input):
 def load_union_galaxy():
     frames = []
 
-    # 1) Prefer local raw files (mounted on your dev machine)
-    koi_path = os.path.join(RAW_DIR, "koi_cumulative.csv")
-    k2_path  = os.path.join(RAW_DIR, "k2pandac.csv")
-    toi_path = os.path.join(RAW_DIR, "toi.csv")
+    # Expected raw file names (if you ever mount them)
+    koi_raw = RAW_DIR / "koi_cumulative.csv"
+    k2_raw  = RAW_DIR / "k2pandc.csv"     # or k2pandac.csv if that’s your file
+    toi_raw = RAW_DIR / "toi.csv"
 
-    # 2) Fallback to repo samples (committed)
-    koi_sample = os.path.join(ROOT_DIR, "data", "samples", "koi_cumulative_sample.csv")
-    k2_sample  = os.path.join(ROOT_DIR, "data", "samples", "k2pandc_sample.csv")
-    toi_sample = os.path.join(ROOT_DIR, "data", "samples", "toi_sample.csv")
+    # Sample fallbacks (committed to repo)
+    # Tip: keep sizes small so Streamlit Cloud fetches them quickly
+    koi_sample = SAMPLES_DIR / "koi_cumulative_sample.csv"
+    k2_sample  = SAMPLES_DIR / "k2pandc_sample.csv"
+    toi_sample = SAMPLES_DIR / "toi_sample.csv"
 
-    # Helper
-    def _try(path, mission, name_prefix):
-        if path and os.path.exists(path):
-            d = safe_read_csv(path)
-            if d is not None and not d.empty:
-                d = normalize_catalog_headers(d)
-                d["mission"] = mission
-                if "name" not in d.columns:
-                    d["name"] = [f"{name_prefix}-{i}" for i in range(len(d))]
-                frames.append(d)
+    def _try(path, mission, prefix):
+        if path and path.exists():
+            df = safe_read_csv(str(path))
+            if df is not None and not df.empty:
+                df = normalize_catalog_headers(df)
+                df["mission"] = mission
+                if "name" not in df.columns:
+                    df["name"] = [f"{prefix}-{i}" for i in range(len(df))]
+                frames.append(df)
+                st.info(f"Loaded: {path.name} ({len(df):,} rows)")
 
-    _try(koi_path if os.path.exists(koi_path) else koi_sample, "kepler", "KOI")
-    _try(k2_path  if os.path.exists(k2_path)  else k2_sample,  "k2",     "K2")
-    _try(toi_path if os.path.exists(toi_path) else toi_sample, "tess",   "TOI")
+    # Prefer raw, else samples
+    _try(koi_raw if koi_raw.exists() else koi_sample, "kepler", "KOI")
+    _try(k2_raw  if k2_raw.exists()  else k2_sample,  "k2",    "K2")
+    _try(toi_raw if toi_raw.exists() else toi_sample, "tess",  "TOI")
 
     if not frames:
-        st.error("No catalog data found (raw or samples). Add a sample to data/samples/ or upload a CSV in the UI.")
+        st.error("No catalog data found in data/raw/ or data/samples/.")
+        st.write("Looked in:", str(RAW_DIR), "and", str(SAMPLES_DIR))
         return pd.DataFrame()
 
-    df = pd.concat(frames, ignore_index=True)
-    return df
+    return pd.concat(frames, ignore_index=True)
 
 # ---------- Plotly renderers ----------
 def render_galaxy3d_plotly(planets, bg="#0b1020", key=None):
